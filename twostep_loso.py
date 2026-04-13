@@ -27,9 +27,8 @@ df = pd.read_csv("D:/WESAD_output/subjectwise_zscore_normalize60s.csv")
 subjects = df['Subject'].values
 X_all = df.iloc[:, 2:2562].values
 y_gender = df['Gender'].values
-df = df[df['Label'].isin(['baseline', 'amusement', 'stress'])]
-df['EmotionBinary'] = df['Label'].map(lambda x: 0 if x in ['baseline', 'amusement'] else 1)
-y_emotion = df['EmotionBinary'].values
+label_encoder = LabelEncoder()
+y_emotion = label_encoder.fit_transform(df['Label'].values)
 
 # Dataset
 class ECGDataset(Dataset):
@@ -62,7 +61,7 @@ class GenderClassifier(nn.Module):
     def forward(self, x): return self.classifier(self.base(x))
 
 class EmotionClassifier(nn.Module):
-    def __init__(self, base, num_classes=2):
+    def __init__(self, base, num_classes=3):
         super().__init__()
         self.base = base
         for param in self.base.parameters(): param.requires_grad = False
@@ -71,7 +70,7 @@ class EmotionClassifier(nn.Module):
     def forward(self, x): return self.classifier(self.base(x))
 
 # Create output directory
-os.makedirs("saved_models/twostep_2class", exist_ok=True)
+os.makedirs("saved_models/twostep", exist_ok=True)
 
 logo = LeaveOneGroupOut()
 all_preds, all_labels = [], []
@@ -112,7 +111,7 @@ for fold, (train_idx, test_idx) in enumerate(logo.split(X_all, y_emotion, groups
             best_gender_state = base_model_gender.state_dict()
 
     # Save best gender feature extractor
-    torch.save(best_gender_state, f"saved_models/twostep_2class/base_gender_{test_subject}.pth")
+    torch.save(best_gender_state, f"saved_models/twostep/base_gender_{test_subject}.pth")
 
     # === Gender Classifier Test ===
     gender_model.eval()
@@ -129,7 +128,7 @@ for fold, (train_idx, test_idx) in enumerate(logo.split(X_all, y_emotion, groups
 
     # === Emotion Classifier Training ===
     base_model_emotion = BaseModel().to(device)
-    base_model_emotion.load_state_dict(torch.load(f"saved_models/twostep_2class/base_gender_{test_subject}.pth",weights_only=True))
+    base_model_emotion.load_state_dict(torch.load(f"saved_models/twostep/base_gender_{test_subject}.pth",weights_only=True))
     emotion_model = EmotionClassifier(base_model_emotion).to(device)
 
     optimizer = optim.Adam(emotion_model.parameters(), lr=0.001)
@@ -156,8 +155,8 @@ for fold, (train_idx, test_idx) in enumerate(logo.split(X_all, y_emotion, groups
             best_acc = acc
             best_emotion_state = emotion_model.state_dict()
 
-    torch.save(best_emotion_state, f"saved_models/twostep_2class/emotion_{test_subject}.pth")
-    print(f"Saved twostep_2class/emotion_{test_subject}.pth (Best Train Acc: {best_acc:.2f}%)")
+    torch.save(best_emotion_state, f"saved_models/twostep/emotion_{test_subject}.pth")
+    print(f"Saved twostep/emotion_{test_subject}.pth (Best Train Acc: {best_acc:.2f}%)")
 
     # === Emotion Classifier Test ===
     emotion_model.load_state_dict(best_emotion_state)
@@ -183,7 +182,7 @@ print(classification_report(all_labels_gender, all_preds_gender, target_names=['
 print("\n=== Emotion Classification (LOSO) ===")
 print("Accuracy:", 100 * np.mean(np.array(all_preds) == np.array(all_labels)))
 print("Confusion Matrix:\n", confusion_matrix(all_labels, all_preds))
-print(classification_report(all_labels, all_preds, target_names=['Baseline/Amusement', 'Stress']))
+print(classification_report(all_labels, all_preds, target_names=label_encoder.classes_))
 
 print("\n=== 每位 Subject 準確率 ===")
 for subject, acc in subject_results:

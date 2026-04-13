@@ -31,9 +31,7 @@ df = pd.read_csv("D:/WESAD_output/subjectwise_zscore_normalize60s.csv")
 subjects = df['Subject'].values
 X_all = df.iloc[:, 2:2562].values
 X_full = df.iloc[:, 2:-1].values
-df = df[df['Label'].isin(['baseline', 'amusement', 'stress'])]
-df['EmotionBinary'] = df['Label'].map(lambda x: 0 if x in ['baseline', 'amusement'] else 1)
-y_emotion = df['EmotionBinary'].values
+y_emotion = LabelEncoder().fit_transform(df['Label'].values)
 
 # ============ HRV 特徵萃取 ============
 hrv_cache = "D:/WESAD_output/hrv_cache.npy"
@@ -84,7 +82,7 @@ class BaseModel(nn.Module):
         return self.feature_extractor(x).view(x.size(0), -1)
 
 class EmotionClassifier(nn.Module):
-    def __init__(self, base, num_classes=2):
+    def __init__(self, base, num_classes=3):
         super().__init__()
         self.base = base
         self.classifier = nn.Sequential(
@@ -94,7 +92,7 @@ class EmotionClassifier(nn.Module):
 
 # ============ Fusion Model ============
 class FusionClassifier(nn.Module):
-    def __init__(self, base_os, base_ts, hrv_dim, num_classes=2):
+    def __init__(self, base_os, base_ts, hrv_dim, num_classes=3):
         super().__init__()
         self.base_os = base_os
         self.base_ts = base_ts
@@ -146,7 +144,7 @@ for fold, (train_idx, test_idx) in enumerate(kf.split(X_all)):
     # OneStep Model
     base_os = BaseModel().to(device)
     model_os = EmotionClassifier(base_os).to(device)
-    model_os.load_state_dict(torch.load(f"saved_models/onestep_10fold_2class/fold{fold+1}_best.pth", weights_only=True))
+    model_os.load_state_dict(torch.load(f"saved_models/onestep_10fold/fold{fold+1}_best.pth", weights_only=True))
     base_os = model_os.base
     for param in base_os.parameters():
         param.requires_grad = False
@@ -155,7 +153,7 @@ for fold, (train_idx, test_idx) in enumerate(kf.split(X_all)):
     # TwoStep Model
     base_ts = BaseModel().to(device)
     model_ts = EmotionClassifier(base_ts).to(device)
-    model_ts.load_state_dict(torch.load(f"saved_models/twostep_10fold_2class/emotion_fold{fold+1}.pth", weights_only=True))
+    model_ts.load_state_dict(torch.load(f"saved_models/twostep_10fold/emotion_fold{fold+1}.pth", weights_only=True))
     base_ts = model_ts.base
     for param in base_ts.parameters():
         param.requires_grad = False
@@ -204,4 +202,4 @@ print("\n=== Final LOSO Results (Feature Fusion from Pretrained + Trained FC) ==
 print("Accuracy:", 100 * accuracy_score(all_labels, all_preds))
 print(confusion_matrix(all_labels, all_preds))
 print(classification_report(all_labels, all_preds))
-print_per_class_accuracy(all_labels, all_preds, class_names=["non-stress", "stress"])
+print_per_class_accuracy(all_labels, all_preds, class_names=["amusement", "baseline", "stress"])

@@ -28,9 +28,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 df = pd.read_csv("D:/WESAD_output/subjectwise_zscore_normalize60s.csv")
 
 X_emotion = df.iloc[:, 2:2562].values
-df = df[df['Label'].isin(['baseline', 'amusement', 'stress'])]
-df['EmotionBinary'] = df['Label'].map(lambda x: 0 if x in ['baseline', 'amusement'] else 1)
-y_emotion = df['EmotionBinary'].values
+label_encoder = LabelEncoder()
+y_emotion = label_encoder.fit_transform(df['Label'].values)
 
 X_gender = df.iloc[:, 2:2562].values
 y_gender = df['Gender'].values
@@ -123,7 +122,7 @@ probs_dt = rf.predict_proba(X_test_hrv)
 acc_rf = accuracy_score(y_hrv_test, y_pred_dt)
 print("Random Forest HRV Test Accuracy: {:.2f}%".format(acc_rf * 100))
 print("Confusion Matrix:\n", confusion_matrix(y_hrv_test, y_pred_dt))
-print("Classification Report:\n", classification_report(y_hrv_test, y_pred_dt))
+print("Classification Report:\n", classification_report(y_hrv_test, y_pred_dt, target_names=label_encoder.classes_))
 
 # ======================== 2️⃣ 數據集類 ========================
 class ECGDataset(Dataset):
@@ -178,7 +177,7 @@ class GenderClassifier(nn.Module):
         return self.classifier(features)
 
 class EmotionClassifier(nn.Module):
-    def __init__(self, base_model, num_classes=2, freeze_base=True):
+    def __init__(self, base_model, num_classes=3, freeze_base=True):
         super().__init__()
         self.base = base_model
         if freeze_base:
@@ -196,7 +195,7 @@ class EmotionClassifier(nn.Module):
         return self.classifier(features)
 
 class EmotionClassifierOneStep(nn.Module):
-    def __init__(self, base_model, num_classes=2):
+    def __init__(self, base_model, num_classes=3):
         super().__init__()
         self.base = base_model
         self.classifier = nn.Sequential(
@@ -344,7 +343,7 @@ def train_emotion_classifier_one_step():
     train_dataset = ECGDataset(X_train_emo, y_train_emo, task='emotion')
     train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True)
 
-    num_epochs = 200
+    num_epochs = 500
     best_acc = 0
     train_losses = []
     train_accuracies = []
@@ -453,26 +452,26 @@ def test_emotion_classifier_fusion():
                 probs.append(F.softmax(outputs, dim=1).cpu().numpy())
         return np.vstack(probs)
     
-    # 获取训练集概率
-    train_probs_two_step = get_probs(emotion_model_two_step, X_train_emo)
-    train_probs_one_step = get_probs(emotion_model_one_step, X_train_emo)
-    train_probs_hrv = rf.predict_proba(X_hrv_train)  # HRV模型训练集概率
+    # # 获取训练集概率
+    # train_probs_two_step = get_probs(emotion_model_two_step, X_train_emo)
+    # train_probs_one_step = get_probs(emotion_model_one_step, X_train_emo)
+    # train_probs_hrv = rf.predict_proba(X_hrv_train)  # HRV模型训练集概率
     
-    # 拼接概率特征 (N_samples, 9)
-    X_fusion_train = np.hstack([
-        train_probs_two_step,
-        train_probs_one_step,
-        train_probs_hrv
-    ])
+    # # 拼接概率特征 (N_samples, 9)
+    # X_fusion_train = np.hstack([
+    #     train_probs_two_step,
+    #     train_probs_one_step,
+    #     train_probs_hrv
+    # ])
     
-    # 3. 训练元分类器
-    meta_classifier = LogisticRegression(
-        # multi_class='multinomial',
-        max_iter=1000,
-        random_state=42
-    )
+    # # 3. 训练元分类器
+    # meta_classifier = LogisticRegression(
+    #     # multi_class='multinomial',
+    #     max_iter=1000,
+    #     random_state=42
+    # )
     
-    meta_classifier.fit(X_fusion_train, y_train_emo)
+    # meta_classifier.fit(X_fusion_train, y_train_emo)
     
     # # 4. 在测试集上融合预测
     # test_dataset = ECGDataset(X_test_emo, y_test_emo, task='emotion')
@@ -482,18 +481,18 @@ def test_emotion_classifier_fusion():
     test_probs_one_step = get_probs(emotion_model_one_step, X_test_emo)
     test_probs_hrv = probs_dt  # 已有的HRV测试集概率
     
-    # 拼接测试集概率特征
-    X_fusion_test = np.hstack([
-        test_probs_two_step,
-        test_probs_one_step,
-        test_probs_hrv
-    ])
+    # # 拼接测试集概率特征
+    # X_fusion_test = np.hstack([
+    #     test_probs_two_step,
+    #     test_probs_one_step,
+    #     test_probs_hrv
+    # ])
     
     # # 元分类器预测
-    y_pred_fusion = meta_classifier.predict(X_fusion_test)
+    # y_pred_fusion = meta_classifier.predict(X_fusion_test)
 
-    # y_prob_fusion = 1/3 * test_probs_one_step + 1/3 * test_probs_two_step + 1/3 * test_probs_hrv
-    # y_pred_fusion =  y_prob_fusion.argmax(1)
+    y_prob_fusion = 1/3 * test_probs_one_step + 1/3 * test_probs_two_step + 1/3 * test_probs_hrv
+    y_pred_fusion =  y_prob_fusion.argmax(1)
 
     # 5. 评估结果
     print("\n=== Emotion Test Results (Probability Fusion) ===")
@@ -502,7 +501,7 @@ def test_emotion_classifier_fusion():
     print("Classification Report:\n", classification_report(
         y_test_emo, 
         y_pred_fusion, 
-        target_names=['Baseline/Amusement', 'Stress']
+        target_names=label_encoder.classes_
     ))
 
 # ======================== 執行訓練與測試 ========================

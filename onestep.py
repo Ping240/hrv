@@ -29,17 +29,16 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ======================== 1️⃣ 数据准备 ========================
 # 读取ECG数据
-# df = pd.read_csv("D:/WESAD_output/subjectwise_zscore_normalize60s.csv")
-df = pd.read_csv("D:/pincode/hrv/WESAD_output/subjectwise_zscore_normalize60s.csv")
+df = pd.read_csv("D:/WESAD_output/subjectwise_zscore_normalize60s.csv")
+
 
 # X_all = df.iloc[:, 2:-1].values
 
 # 第二阶段数据（情感分类）
 X_emotion = df.iloc[:, 2:2562].values
+label_encoder = LabelEncoder()
+y_emotion = label_encoder.fit_transform(df['Label'].values)  # 转换为数值标签
 
-df = df[df['Label'].isin(['baseline', 'amusement', 'stress'])]
-df['EmotionBinary'] = df['Label'].map(lambda x: 0 if x in ['baseline', 'amusement'] else 1)
-y_emotion = df['EmotionBinary'].values
 
 
 # ======================== 2️⃣ 数据预处理 ========================
@@ -104,7 +103,7 @@ class BaseModel(nn.Module):
 
 
 class EmotionClassifier(nn.Module):
-    def __init__(self, base_model, num_classes=2):
+    def __init__(self, base_model, num_classes=3):
         super().__init__()
         self.base = base_model
         self.classifier = nn.Sequential(
@@ -128,8 +127,9 @@ def train_emotion_classifier():
     base_model_emotion = BaseModel().to(device)
     
     emotion_model = EmotionClassifier(base_model_emotion).to(device)
-    optimizer = optim.Adam(emotion_model.parameters(), lr=0.001, weight_decay=1e-4)
+    optimizer = optim.Adam(emotion_model.parameters(), lr=0.001)
     criterion = nn.CrossEntropyLoss()
+
 
     # 数据加载
     train_dataset = ECGDataset(X_train_emo, y_train_emo, task='emotion')
@@ -188,8 +188,7 @@ def train_emotion_classifier():
     plt.grid(True)
     
     plt.tight_layout()
-    plt.savefig('result/train_curves.png')
-    # plt.savefig('train_curves.png')
+    plt.savefig('train_curves.png')
     plt.show()
 
 # ======================== 7️⃣ 测试评估 ========================
@@ -232,6 +231,7 @@ def test_emotion_classifier():
     print("Classification Report:\n", classification_report(
         all_labels, 
         all_preds, 
+        target_names=label_encoder.classes_
     ))
 
 # ======================== 执行训练 ========================

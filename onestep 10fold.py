@@ -1,5 +1,3 @@
-# 將 onestep.py 修改為 LOSO 並儲存每位 subject 的模型權重與結果（以最高 train acc 儲存）
-
 import os
 import numpy as np
 import torch
@@ -7,12 +5,12 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import pandas as pd
+from sklearn.model_selection import KFold
 from sklearn.metrics import confusion_matrix, classification_report
 from sklearn.preprocessing import LabelEncoder
 import matplotlib.pyplot as plt
 import random
 
-# ============ 固定隨機種子 ============
 def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
@@ -26,9 +24,9 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ============ 數據讀取 ============
 df = pd.read_csv("D:/WESAD_output/subjectwise_zscore_normalize60s.csv")
-subjects = df['Subject'].unique()
 label_encoder = LabelEncoder()
 y_all = label_encoder.fit_transform(df['Label'].values)
+X_all = df.iloc[:, 2:2562].values
 
 # ============ Dataset 類 ============
 class ECGDataset(Dataset):
@@ -77,33 +75,28 @@ class EmotionClassifier(nn.Module):
         features = self.base(x)
         return self.classifier(features)
 
-# ============ 主程序 ============
+# ============ 10-Fold 交叉驗證 ============
 if __name__ == "__main__":
-    os.makedirs("saved_models/onestep", exist_ok=True)
+    os.makedirs("saved_models/onestep_10fold", exist_ok=True)
 
-    all_preds = []
-    all_labels = []
-    subject_results = []
+    all_preds, all_labels = [], []
+    fold_accuracies = []
 
-    for i, test_subject in enumerate(subjects):
-        print(f"\n=== 處理受試者 {i+1}/{len(subjects)}: {test_subject} ===")
+    skf = KFold(n_splits=10, shuffle=True, random_state=42)
+    for fold, (train_idx, test_idx) in enumerate(skf.split(X_all, y_all), 1):
+        print(f"\n=== Fold {fold}/10 ===")
 
-        train_df = df[df['Subject'] != test_subject]
-        test_df = df[df['Subject'] == test_subject]
-
-        X_train = train_df.iloc[:, 2:2562].values
-        y_train = label_encoder.transform(train_df['Label'].values)
-        X_test = test_df.iloc[:, 2:2562].values
-        y_test = label_encoder.transform(test_df['Label'].values)
+        X_train, y_train = X_all[train_idx], y_all[train_idx]
+        X_test, y_test = X_all[test_idx], y_all[test_idx]
 
         train_dataset = ECGDataset(X_train, y_train)
-        train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True)
         test_dataset = ECGDataset(X_test, y_test)
+        train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True)
         test_loader = DataLoader(test_dataset, batch_size=128, shuffle=False)
 
         base_model = BaseModel().to(device)
         model = EmotionClassifier(base_model).to(device)
-        optimizer = optim.Adam(model.parameters(), lr=0.001)
+        optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-4)
         criterion = nn.CrossEntropyLoss()
 
         best_acc = 0
@@ -129,8 +122,8 @@ if __name__ == "__main__":
                 print(f"Epoch {epoch+1}: Loss={total_loss/len(train_dataset):.4f}, Acc={acc:.2f}%")
 
         # 儲存最佳模型
-        torch.save(best_state_dict, f"saved_models/onestep/emotion_{test_subject}.pth")
-        print(f"儲存模型至: saved_models/onestep/emotion_{test_subject}.pth (Best Train Acc: {best_acc:.2f}%)")
+        torch.save(best_state_dict, f"saved_models/onestep_10fold/fold{fold}_best.pth")
+        print(f"儲存模型至: saved_models/onestep_10fold/fold{fold}_best.pth (Best Train Acc: {best_acc:.2f}%)")
 
         # 測試階段
         model.load_state_dict(best_state_dict)
@@ -148,15 +141,11 @@ if __name__ == "__main__":
         all_preds.extend(preds)
         all_labels.extend(labels)
         acc = 100 * np.mean(np.array(preds) == np.array(labels))
-        subject_results.append((test_subject, acc))
-        print(f"Subject {test_subject} Accuracy: {acc:.2f}%")
+        fold_accuracies.append(acc)
+        print(f"Fold {fold} Accuracy: {acc:.2f}%")
 
     # 總體結果
-    print("\n=== Overall LOSO 結果 ===")
-    print("整體準確率:", 100 * np.mean(np.array(all_preds) == np.array(all_labels)))
+    print("\n=== Overall 10-Fold 結果 ===")
+    print(f"平均準確率: {np.mean(fold_accuracies):.2f}%")
     print("混淆矩陣:\n", confusion_matrix(all_labels, all_preds))
     print("分類報告:\n", classification_report(all_labels, all_preds, target_names=label_encoder.classes_))
-
-    print("\n=== 每個受試者的準確率 ===")
-    for subject, acc in subject_results:
-        print(f"Subject {subject}: {acc:.2f}%")

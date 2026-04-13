@@ -24,7 +24,7 @@ def set_seed(seed):
 set_seed(42)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Using device: {device}")
+
 # ========== 提取 HRV 特徵 ==========
 def extract_hrv_features_from_array(X, sampling_rate=256):
     hrv_features = []
@@ -40,10 +40,15 @@ def extract_hrv_features_from_array(X, sampling_rate=256):
 
             # 頻域特徵
             hrv_freq = nk.hrv_frequency(rpeaks, sampling_rate=sampling_rate, show=False)
-            # print(f"R-peaks count: {len(rpeaks['ECG_R_Peaks'])}")  #R-peak在正常範圍
+
+            # 非線性特徵
+            hrv_nonlinear = nk.hrv_nonlinear(rpeaks, sampling_rate=sampling_rate, show=False)
+            wanted_features = ["HRV_SD1", "HRV_SD2", "HRV_SD1SD2", "HRV_S", "HRV_CSI", "HRV_CVI", "HRV_CSI_Modified",
+                               "HRV_GI", "HRV_SI", "HRV_AI", "HRV_PI"]
+            hrv_nonlinear = hrv_nonlinear[[f for f in wanted_features if f in hrv_nonlinear.columns]]
 
             # 合併
-            hrv_all = pd.concat([hrv_time, hrv_freq], axis=1)
+            hrv_all = pd.concat([hrv_time, hrv_freq, hrv_nonlinear], axis=1)
             
             if hrv_columns is None:
                 hrv_columns = hrv_all.columns  # 儲存欄位名
@@ -51,18 +56,15 @@ def extract_hrv_features_from_array(X, sampling_rate=256):
             hrv_features.append(hrv_all.iloc[0].values)
         except Exception as e:
             print(f"Warning at index {i}: {e}")
-            print(f"Signal length: {len(signal)}")
-            nan_array = np.empty(len(hrv_columns) if hrv_columns is not None else 50)  # 50 是保底估值
+            nan_array = np.empty(len(hrv_columns) if hrv_columns is not None else 100)  # 50 是保底估值
             nan_array[:] = np.nan
             hrv_features.append(nan_array)
 
     hrv_features = np.array(hrv_features)
 
     # 指定要排除的欄位
-    # cols_to_remove = ['HRV_ULF', 'HRV_VLF', 'HRV_SDANN1', 'HRV_SDNNI1', 'HRV_SDANN2', 
-    #                   'HRV_SDNNI2', 'HRV_SDANN5', 'HRV_SDNNI5']
     cols_to_remove = ['HRV_ULF', 'HRV_VLF', 'HRV_SDANN1', 'HRV_SDNNI1', 'HRV_SDANN2', 
-                      'HRV_SDNNI2', 'HRV_SDANN5', 'HRV_SDNNI5','HRV_LF', 'HRV_LFHF', 'HRV_LFn']
+                      'HRV_SDNNI2', 'HRV_SDANN5', 'HRV_SDNNI5']
     if hrv_columns is not None:
         remove_indices = [i for i, col in enumerate(hrv_columns) if col in cols_to_remove]
         hrv_features = np.delete(hrv_features, remove_indices, axis=1)
@@ -72,18 +74,16 @@ def extract_hrv_features_from_array(X, sampling_rate=256):
 
 
 # ========== 讀取數據 ==========
-df = pd.read_csv("D:/pincode/hrv/WESAD_output/subjectwise_zscore_normalize60s.csv")
+df = pd.read_csv("D:/WESAD_output/subjectwise_zscore_normalize60s.csv")
 subjects = df['Subject'].unique()
 
 
 # 提取 HRV 特徵（以每列作為一段 ECG 信號）
 X_ecg_raw = df.iloc[:, 2:-1].values
-df = df[df['Label'].isin(['baseline', 'amusement', 'stress'])]
-df['EmotionBinary'] = df['Label'].map(lambda x: 0 if x in ['baseline', 'amusement'] else 1)
-y_emotion = df['EmotionBinary'].values
+y_emotion = LabelEncoder().fit_transform(df['Label'].values)
 
 X_hrv, hrv_columns = extract_hrv_features_from_array(X_ecg_raw)
-###
+
 print(f"提取的 HRV 特徵形狀: {X_hrv.shape}")
 print(X_hrv)
 
@@ -98,7 +98,7 @@ for col_idx, count in enumerate(nan_per_column):
     print(f"列 {col_idx}: {count} 个 NaN")
 
 print(f"欄特徵名稱: {hrv_columns}")
-###
+
 # ========== 90/10 數據分割 ==========
 def main():
     # 90/10 分割

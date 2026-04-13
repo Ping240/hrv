@@ -29,7 +29,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ======================== 1️⃣ 数据准备 ========================
 # 读取ECG数据
-df = pd.read_csv("D:/pincode/hrv/WESAD_output/ecg_all_segments.csv")
+df = pd.read_csv("D:/WESAD_output/subjectwise_zscore_normalize60s.csv")
 
 # X_all = df.iloc[:, 2:-1].values
 
@@ -39,9 +39,8 @@ y_gender = df['Gender'].values
 
 # 第二阶段数据（情感分类）
 X_emotion = df.iloc[:, 2:2562].values
-df = df[df['Label'].isin(['baseline', 'amusement', 'stress'])]
-df['EmotionBinary'] = df['Label'].map(lambda x: 0 if x in ['baseline', 'amusement'] else 1)
-y_emotion = df['EmotionBinary'].values
+label_encoder = LabelEncoder()
+y_emotion = label_encoder.fit_transform(df['Label'].values)  # 转换为数值标签
 
 # ======================== 2️⃣ 数据预处理 ========================
 # 性别数据划分
@@ -117,7 +116,7 @@ class GenderClassifier(nn.Module):
         return self.classifier(features)
 
 class EmotionClassifier(nn.Module):
-    def __init__(self, base_model, num_classes=2):
+    def __init__(self, base_model, num_classes=3):
         super().__init__()
         self.base = base_model
         for param in self.base.parameters():  # 冻结特征提取器
@@ -354,6 +353,7 @@ def test_emotion_classifier():
     print("Classification Report:\n", classification_report(
         all_labels, 
         all_preds, 
+        target_names=label_encoder.classes_
     ))
 
 # ======================== 执行训练 ========================
